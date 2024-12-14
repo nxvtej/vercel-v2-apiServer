@@ -4,6 +4,9 @@ const express = require("express");
 const http = require("http");
 const app = express();
 const PORT = 9000;
+const z = require("zod");
+const { PrismaClient } = require("@prisma/client");
+const prisma = new PrismaClient();
 
 require("dotenv").config();
 console.log(require("fs").readdirSync("./"));
@@ -23,7 +26,7 @@ const {
 const Redis = require("ioredis");
 const { Server } = require("socket.io");
 
-const REDISHOST = "";
+const REDISHOST = process.env.REDIS_HOST;
 const subscriber = new Redis(REDISHOST);
 
 subscriber.on("connect", () => console.log("Connected to Redis"));
@@ -64,9 +67,68 @@ const config = {
 app.use(express.json());
 
 app.post("/project", async (req, res) => {
-	const { gitUrl } = req.body;
-	const project = generateSlug(2);
+	const schema = z.object({
+		gitUrl: z.string().url(),
+		name: z.string(),
+	});
+	const safeParse = schema.safeParse(req.body);
+	if (safeParse.error) {
+		return res.status(400).json({
+			status: "error",
+			message: safeParse.error.errors,
+		});
+	}
 
+	const { name, gitUrl } = safeParse.data;
+	const project = await prisma.project.create({
+		data: {
+			name,
+			gitUrl,
+			subDomain: generateSlug(2),
+		},
+	});
+});
+
+app.post("/deploy", async (req, res) => {
+	const schema = z.object({
+		projectId: z.string(),
+	});
+	const safeParse = schema.safeParse(req.body);
+	if (safeParse.error) {
+		return res.status(400).json({
+			status: "error",
+			message: safeParse.error.errors,
+		});
+	}
+	const { projectId } = safeParse.data;
+	const project = await prisma.project.findUnique({
+		where: {
+			id: projectId,
+		},
+	});
+
+	if (!project) {
+		return res.status(404).json({
+			status: "error",
+			message: "Project not found",
+		});
+	}
+
+	// check if their is no running task
+	// check if the project is not already running
+
+	const deployment = await prisma.deployment.create({
+		data: {
+			projectId: {
+				connect: {
+					id: projectId,
+				},
+			},
+			status: "QUEUED",
+		},
+	});
+
+	const deploymentId = deployment.id;
 	const command = createRunTaskCommand(
 		{
 			CLUSTER: config.CLUSTER,
@@ -76,8 +138,9 @@ app.post("/project", async (req, res) => {
 			SUBNET3: AWS_SUBNET3,
 			SECURITY_GROUP: AWS_SECURITY_GROUP,
 		},
-		gitUrl,
-		project
+		project.gitUrl,
+		projectId,
+		deploymentId
 	);
 
 	await ecsClient.send(command);

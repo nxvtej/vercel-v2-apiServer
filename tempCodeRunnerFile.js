@@ -1,1 +1,1 @@
-	REDISHOST
+Redis

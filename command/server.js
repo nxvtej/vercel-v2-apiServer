@@ -2,7 +2,7 @@
 
 const { RunTaskCommand } = require("@aws-sdk/client-ecs");
 
-function createRunTaskCommand(config, gitUrl, project) {
+function createRunTaskCommand(config, gitUrl, project, deploymentId) {
 	return new RunTaskCommand({
 		cluster: config.CLUSTER,
 		taskDefinition: config.TASK,
@@ -27,6 +27,10 @@ function createRunTaskCommand(config, gitUrl, project) {
 						{
 							name: "PROJECT_ID",
 							value: project,
+						},
+						{
+							name: "DEPLOYMENT_ID",
+							value: deploymentId,
 						},
 					],
 				},
